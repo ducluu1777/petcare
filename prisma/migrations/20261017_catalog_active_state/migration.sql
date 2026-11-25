@@ -1,0 +1,5 @@
+ALTER TABLE "services"
+ADD COLUMN "isActive" BOOLEAN NOT NULL DEFAULT true;
+
+ALTER TABLE "products"
+ADD COLUMN "isActive" BOOLEAN NOT NULL DEFAULT true;

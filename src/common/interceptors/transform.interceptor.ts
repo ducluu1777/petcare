@@ -1,0 +1,29 @@
+import {
+  Injectable,
+  NestInterceptor,
+  ExecutionContext,
+  CallHandler,
+} from '@nestjs/common';
+import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
+
+export interface Response<T> {
+  success: boolean;
+  data: T;
+  meta?: Record<string, unknown>;
+}
+
+@Injectable()
+export class TransformInterceptor<T> implements NestInterceptor<T, Response<T>> {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<Response<T>> {
+    return next.handle().pipe(
+      map((data) => {
+        // Nếu service trả về { data, meta } thì tách ra
+        if (data && typeof data === 'object' && 'data' in data && 'meta' in data) {
+          return { success: true, data: data.data, meta: data.meta };
+        }
+        return { success: true, data };
+      }),
+    );
+  }
+}

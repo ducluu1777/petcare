@@ -1,0 +1,857 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  CUSTOMER
+  STAFF
+  ADMIN
+}
+
+enum AiChatRequestStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ContactRequestStatus {
+  NEW
+  IN_PROGRESS
+  RESOLVED
+}
+
+enum OAuthProvider {
+  GOOGLE
+}
+
+enum Species {
+  DOG
+  CAT
+}
+
+enum BehavioralFlag {
+  NORMAL
+  AGGRESSIVE
+  TIMID
+}
+
+enum ServiceCategory {
+  BATH
+  GROOMING
+  CAT_SPA
+}
+
+enum SlotPeriod {
+  MORNING
+  AFTERNOON
+}
+
+enum BookingType {
+  SPA
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  READY_FOR_PICKUP
+  COMPLETED
+  CANCELLED
+}
+
+enum BookingStatusV2 {
+  BOOKED
+  ARRIVED
+  IN_SERVICE
+  READY_FOR_PICKUP
+  DONE
+  CANCELLED
+  NO_SHOW
+}
+
+enum BookingSource {
+  WEB
+  RECEPTIONIST
+  WALK_IN
+}
+
+enum TransactionType {
+  // Retained for legacy records only; new payment requests must not use deposits.
+  DEPOSIT
+  FINAL_PAYMENT
+  REFUND
+}
+
+enum BookingPaymentIntentStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  REVIEW
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+}
+
+enum ProductCategory {
+  FOOD
+  SNACK
+  CARE
+  ACCESSORY
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  READY
+  IN_DELIVERY
+  DELIVERY_FAILED
+  COMPLETED
+  CANCELLED
+}
+
+enum FulfillmentMethod {
+  PICKUP
+  DELIVERY
+}
+
+enum SepayWebhookEventStatus {
+  CONFIRMED
+  REVIEW
+  IGNORED
+  REVIEWED
+}
+
+enum OrderSource {
+  ONLINE
+  IN_STORE
+}
+
+enum ProductStockMovementType {
+  OPENING_BALANCE
+  ADJUSTMENT
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+enum LoyaltyType {
+  EARN
+  REDEEM
+}
+
+enum ReviewTargetType {
+  SERVICE
+  PRODUCT
+}
+
+enum NotificationType {
+  BOOKING
+  ORDER
+  LOYALTY
+  REMINDER
+  SYSTEM
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id               String    @id @default(uuid())
+  email            String?   @unique
+  name             String
+  phone            String?   @unique
+  avatarUrl        String?
+  role             Role      @default(CUSTOMER)
+  loyaltyPoints    Int       @default(0)
+  noShowCount      Int       @default(0)
+  isEmailVerified  Boolean   @default(false)
+  emailVerifyToken String?
+  refreshToken     String?
+  isActive         Boolean   @default(true)
+  deletedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  oauthAccounts                OAuthAccount[]
+  pets                         PetProfile[]
+  bookings                     Booking[]
+  assignedBookings             Booking[]              @relation("AssignedStaff")
+  orders                       Order[]
+  voucherUsages                VoucherUsage[]
+  loyaltyTransactions          LoyaltyTransaction[]
+  confirmedTransactions        Transaction[]          @relation("TransactionConfirmedBy")
+  confirmedOrderPaymentIntents OrderPaymentIntent[]   @relation("OrderPaymentConfirmedBy")
+  reviews                      Review[]
+  moderatedReviews             Review[]               @relation("ReviewModerator")
+  notifications                Notification[]
+  auditLogsTargeted            AuditLog[]             @relation("TargetUser")
+  auditLogsPerformed           AuditLog[]             @relation("PerformedBy")
+  productStockMovements        ProductStockMovement[] @relation("ProductStockMovementActor")
+  adminCredential              AdminCredential?
+
+  @@map("users")
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  action        String
+  performedById String
+  targetUserId  String
+  details       Json
+  createdAt     DateTime @default(now())
+
+  performedBy User @relation("PerformedBy", fields: [performedById], references: [id])
+  targetUser  User @relation("TargetUser", fields: [targetUserId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model OAuthAccount {
+  id                String        @id @default(uuid())
+  userId            String
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          OAuthProvider
+  providerAccountId String
+  createdAt         DateTime      @default(now())
+
+  @@unique([provider, providerAccountId])
+  @@map("oauth_accounts")
+}
+
+model AdminCredential {
+  userId       String   @id
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("admin_credentials")
+}
+
+model PetProfile {
+  id             String         @id @default(uuid())
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  species        Species
+  breed          String
+  weightKg       Float
+  ageMonths      Int?
+  avatarUrl      String?
+  notes          String?
+  lastGroomingAt DateTime?
+  nextSpaDate    DateTime? // AI Reminder trigger date
+  hasVaccine     Boolean        @default(false) // Thông tin tiêm phòng
+  behavioralFlag BehavioralFlag @default(NORMAL) // Cảnh báo đỏ
+  archivedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  bookings Booking[]
+
+  @@map("pet_profiles")
+}
+
+// ─── Services ─────────────────────────────────────────────────────────────────
+
+model Service {
+  id                  String          @id @default(uuid())
+  name                String
+  slug                String          @unique
+  tagline             String
+  description         String
+  category            ServiceCategory
+  durationMin         Int
+  isPopular           Boolean         @default(false)
+  isSignature         Boolean         @default(false)
+  isAddon             Boolean         @default(false) // Nếu true, đây là Add-on Service
+  requiresVaccination Boolean         @default(false)
+  imageUrl            String?
+  isActive            Boolean         @default(true)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  priceTiers      ServicePriceTier[]
+  servicePrices   ServicePrice[]
+  bookingServices BookingService[]
+
+  @@map("services")
+}
+
+model ServicePriceTier {
+  id        String   @id @default(uuid())
+  serviceId String
+  service   Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  minWeight Float
+  maxWeight Float
+  price     Int
+  label     String // VD: "Dưới 5kg", "5-10kg"
+  species   Species? // null = áp dụng cả 2 loài
+
+  @@map("service_price_tiers")
+}
+
+// ─── Phân nhóm cân nặng chuẩn hóa V2 ──────────────────────────────────────────
+model SizeTier {
+  id        String   @id @default(uuid())
+  name      String // "Nhỏ", "Vừa", "Lớn", "Rất lớn"
+  minKg     Float // Khoảng nửa mở [minKg, maxKg)
+  maxKg     Float // Nhóm "Rất lớn" để maxKg = 999.0
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  servicePrices   ServicePrice[]
+  bookingServices BookingService[]
+
+  @@map("size_tiers")
+}
+
+// ─── Bảng giá & Thời lượng theo nhóm cân nặng V2 ──────────────────────────────
+model ServicePrice {
+  id          String   @id @default(uuid())
+  serviceId   String
+  service     Service  @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  sizeTierId  String
+  sizeTier    SizeTier @relation(fields: [sizeTierId], references: [id], onDelete: Restrict)
+  durationMin Int // Thời lượng thực tế làm dịch vụ (phút) - Server tự tra cứu
+  priceFrom   Int // Giá niêm yết "Từ ... đ"
+  active      Boolean  @default(true)
+
+  @@unique([serviceId, sizeTierId])
+  @@map("service_prices")
+}
+
+// ─── Booking ──────────────────────────────────────────────────────────────────
+
+// ─── Cấu hình Salon & Công suất V2 ───────────────────────────────────────────
+model ShopSettings {
+  id                       String   @id @default("singleton")
+  capacity                 Int      @default(3) // Tổng số chỗ làm song song tại tiệm (N >= 1)
+  webCapacity              Int? // Số ca Web tối đa đồng thời (null = dùng capacity)
+  bufferMin                Int      @default(15) // Thời gian dọn dẹp vệ sinh trạm giữa 2 ca
+  slotStepMin              Int      @default(30) // Bước nhảy hiển thị giờ bắt đầu trên Web (30 phút: 08:00, 08:30...)
+  minNoticeHours           Int      @default(2) // Đặt trước tối thiểu qua web (2 giờ)
+  maxAdvanceDays           Int      @default(30) // Đặt trước tối đa qua web (30 ngày)
+  cancelBeforeHours        Int      @default(4) // Khách được tự hủy trước (4 giờ)
+  noShowGraceMin           Int      @default(20) // Số phút quá giờ hẹn trước khi được bấm No-show (20 phút)
+  noShowWarnCount          Int      @default(3) // Ngưỡng số lần no-show bắt đầu cảnh báo lễ tân (3 lần)
+  spaBookingPromotionActive Boolean  @default(true) @map("qinpetSpaPromotionActive")
+  latePickupFeeAmount      Int      @default(50000)
+  openHours                Json // Giờ mở cửa: {"1":{"open":"08:00","close":"21:00"}, ...} (1=T2 ... 7=CN)
+  holidays                 String[] @default([]) // Danh sách ngày nghỉ lễ tiệm đóng cửa (YYYY-MM-DD theo giờ VN)
+  updatedAt                DateTime @updatedAt
+
+  @@map("shop_settings")
+}
+
+model TimeSlot {
+  id       String     @id @default(uuid())
+  slotDate DateTime   @db.Date
+  slotTime String
+  period   SlotPeriod
+  capacity Int        @default(5)
+  booked   Int        @default(0)
+
+  bookings Booking[]
+
+  @@unique([slotDate, slotTime])
+  @@map("time_slots")
+}
+
+model Booking {
+  aiConfirmationId String?     @unique
+  idempotencyKey   String?     @unique
+  idempotencyHash  String?
+  id               String      @id @default(uuid())
+  code             String      @unique
+  type             BookingType // Lịch hẹn Spa
+  customerId       String
+  customer         User        @relation(fields: [customerId], references: [id])
+  petId            String
+  pet              PetProfile  @relation(fields: [petId], references: [id])
+
+  // V2 Time & Overlap fields (Khoảng nửa mở [startAt, endAt) - nullable trong Pha 1)
+  startAt    DateTime?
+  endAt      DateTime?
+  extraMin   Int       @default(0)
+  extraPrice Int       @default(0)
+
+  // Status & pricing
+  status   BookingStatus    @default(PENDING) // Enum cũ giữ nguyên trong Pha 1
+  statusV2 BookingStatusV2? // Cột mới trong Pha 1
+  source   BookingSource    @default(WEB)
+
+  subtotal                   Int
+  discount                   Int       @default(0)
+  total                      Int
+  isPaid                     Boolean   @default(false)
+  latePickupFeeAmount        Int       @default(0)
+  latePickupFeeAssessedAt    DateTime?
+  latePickupFeePaidAt        DateTime?
+  spaBookingPromotionEligible Boolean   @default(false) @map("qinpetSpaPromotionEligible")
+
+  pointsAwarded  Int       @default(0)
+  reminderSentAt DateTime?
+
+  // Staff & ops
+  assignedStaffId  String?
+  assignedStaff    User?   @relation("AssignedStaff", fields: [assignedStaffId], references: [id])
+  createdByStaffId String?
+
+  // Spa fields (V1 - giữ nguyên trong Pha 1)
+  timeSlotId String?
+  timeSlot   TimeSlot? @relation(fields: [timeSlotId], references: [id])
+
+  waiverAcceptedAt DateTime? // Thời điểm ký Phiếu cam kết
+  staffNote        String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  services       BookingService[]
+  statusLogs     BookingStatusLog[]
+  transactions   Transaction[]
+  paymentIntents BookingPaymentIntent[]
+  voucherUsage   VoucherUsage?
+  sepayWebhookEvents SepayWebhookEvent[]
+
+  @@index([statusV2, startAt, endAt])
+  @@index([customerId, startAt])
+  @@map("bookings")
+}
+
+model BookingService {
+  id           String    @id @default(uuid())
+  bookingId    String
+  booking      Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  serviceId    String
+  service      Service   @relation(fields: [serviceId], references: [id])
+  sizeTierId   String?
+  sizeTier     SizeTier? @relation(fields: [sizeTierId], references: [id], onDelete: Restrict)
+  durationMin  Int? // Chụp lại thời lượng (nullable trong Pha 1)
+  priceApplied Int // Snapshot giá tại thời điểm đặt
+
+  @@map("booking_services")
+}
+
+// ─── Audit Log trạng thái & Vận hành (Cấm cascade delete) ──────────────────────
+model BookingStatusLog {
+  id         String           @id @default(uuid())
+  bookingId  String
+  booking    Booking          @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  fromStatus BookingStatusV2?
+  toStatus   BookingStatusV2
+  action     String // "CREATE", "RESCHEDULE", "EXTEND_TIME", "STATUS_CHANGE", "CANCEL", "FORCE_OVERBOOK"
+  staffId    String? // null nếu khách web tự hủy
+  reason     String?
+  meta       Json? // { oldStart, newStart, oldEnd, newEnd, extraMin, forcedOverbook: true, priceAdjusted }
+  createdAt  DateTime         @default(now())
+
+  @@index([bookingId, createdAt])
+  @@map("booking_status_logs")
+}
+
+model Transaction {
+  id             String          @id @default(uuid())
+  externalId     String?         @unique
+  bookingId      String?
+  booking        Booking?        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  orderId        String?
+  order          Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  amount         Int
+  careFeeAmount  Int             @default(0)
+  type           TransactionType // FINAL_PAYMENT | REFUND
+  paymentMethod  PaymentMethod
+  receivedAmount Int?
+  confirmedById  String?
+  confirmedBy    User?           @relation("TransactionConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
+  proofUrl       String? // Ảnh bill chuyển khoản
+  note           String?
+  createdAt      DateTime        @default(now())
+
+  @@map("transactions")
+}
+
+model BookingPaymentIntent {
+  id                     String                     @id @default(uuid())
+  bookingId              String
+  booking                Booking                    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  amount                 Int
+  careFeeAmount          Int                        @default(0)
+  voucherCode            String?
+  paymentRef             String                     @unique
+  status                 BookingPaymentIntentStatus @default(PENDING)
+  externalId             String?                    @unique
+  receivedAmount         Int?
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+  bankTransferReferences BankTransferReference[]
+
+  @@index([bookingId, status, createdAt])
+  @@map("booking_payment_intents")
+}
+
+// ─── Products & Orders ────────────────────────────────────────────────────────
+
+model Product {
+  id                       String          @id @default(uuid())
+  name                     String
+  slug                     String          @unique
+  category                 ProductCategory
+  price                    Int
+  originalPrice            Int?
+  stock                    Int             @default(0)
+  reservedStock            Int             @default(0)
+  imageUrl                 String?
+  description              String
+  rating                   Float           @default(5.0)
+  reviewCount              Int             @default(0)
+  isActive                 Boolean         @default(true)
+  isBestSeller             Boolean         @default(false)
+  isNew                    Boolean         @default(true)
+  // AI Recommendation metadata
+  suitableSpecies          Species? // null = cả 2 loài
+  minWeightKg              Float?
+  maxWeightKg              Float?
+  estimatedConsumptionDays Int? // Số ngày dùng hết để tính nhắc nhở
+  tags                     Json? // VD: ["sensitive_stomach", "senior", "grain_free"]
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+
+  specifications ProductSpec[]
+  orderItems     OrderItem[]
+  stockMovements ProductStockMovement[]
+
+  @@map("products")
+}
+
+model ProductSpec {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  label     String // VD: "Hạn dùng", "Xuất xứ"
+  value     String // VD: "24 tháng", "Pháp"
+
+  @@map("product_specs")
+}
+
+model ProductStockMovement {
+  id            String                   @id @default(uuid())
+  productId     String
+  product       Product                  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  type          ProductStockMovementType
+  quantity      Int
+  stockBefore   Int
+  stockAfter    Int
+  reason        String
+  performedById String
+  performedBy   User                     @relation("ProductStockMovementActor", fields: [performedById], references: [id], onDelete: Restrict)
+  createdAt     DateTime                 @default(now())
+
+  @@index([productId, createdAt])
+  @@index([performedById, createdAt])
+  @@map("product_stock_movements")
+}
+
+model DeliveryArea {
+  id          String   @id @default(uuid())
+  province    String
+  provinceKey String
+  ward        String
+  wardKey     String
+  fee         Int
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  orders      Order[]
+
+  @@unique([provinceKey, wardKey])
+  @@index([isActive, province, ward])
+  @@map("delivery_areas")
+}
+
+model Order {
+  id                 String         @id @default(uuid())
+  code               String         @unique
+  idempotencyKey     String?        @unique
+  idempotencyHash    String?
+  customerId         String?
+  customer           User?          @relation(fields: [customerId], references: [id])
+  source             OrderSource    @default(ONLINE)
+  status             OrderStatus    @default(PENDING)
+  subtotal           Int
+  discount           Int            @default(0)
+  fulfillmentMethod  FulfillmentMethod @default(PICKUP)
+  deliveryAreaId     String?
+  deliveryArea       DeliveryArea?   @relation(fields: [deliveryAreaId], references: [id], onDelete: SetNull)
+  deliveryProvince   String?
+  deliveryWard       String?
+  deliveryAddress    String?
+  deliveryFee        Int             @default(0)
+  contactName        String?
+  contactPhone       String?
+  paymentCode        String?         @unique
+  paymentExpiresAt   DateTime?
+  total              Int
+  paymentMethod      PaymentMethod?
+  isPaid             Boolean        @default(false)
+  note               String?
+  cancellationReason String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  items                  OrderItem[]
+  voucherUsage           VoucherUsage?
+  paymentIntents         OrderPaymentIntent[]
+  transactions           Transaction[]
+  bankTransferReferences BankTransferReference[]
+  sepayWebhookEvents     SepayWebhookEvent[]
+
+  @@index([isPaid, paymentExpiresAt])
+  @@map("orders")
+}
+
+model SepayWebhookEvent {
+  id             String                  @id
+  orderId        String?
+  order          Order?                  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  bookingId      String?
+  booking        Booking?                @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  paymentCode    String?
+  accountNumber  String?
+  transferType   String?
+  amount         Int
+  referenceCode  String?
+  status         SepayWebhookEventStatus
+  reason         String?
+  reviewNote     String?
+  reviewedById   String?
+  reviewedAt     DateTime?
+  createdAt      DateTime                @default(now())
+
+  @@index([status, createdAt])
+  @@index([bookingId])
+  @@map("sepay_webhook_events")
+}
+
+model OrderPaymentIntent {
+  id                     String                     @id @default(uuid())
+  orderId                String
+  order                  Order                      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amount                 Int
+  paymentRef             String                     @unique
+  status                 BookingPaymentIntentStatus @default(PENDING)
+  externalId             String?                    @unique
+  receivedAmount         Int?
+  confirmedById          String?
+  confirmedBy            User?                      @relation("OrderPaymentConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
+  excessRefunded         Boolean                    @default(false)
+  expiresAt              DateTime
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+  bankTransferReferences BankTransferReference[]
+
+  @@index([status, expiresAt])
+  @@index([orderId, createdAt])
+  @@map("order_payment_intents")
+}
+
+model BankTransferReference {
+  id                     String                @id @default(uuid())
+  reference              String                @unique
+  orderId                String?
+  order                  Order?                @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  bookingPaymentIntentId String?
+  bookingPaymentIntent   BookingPaymentIntent? @relation(fields: [bookingPaymentIntentId], references: [id], onDelete: Restrict)
+  orderPaymentIntentId   String?
+  orderPaymentIntent     OrderPaymentIntent?   @relation(fields: [orderPaymentIntentId], references: [id], onDelete: Restrict)
+  createdAt              DateTime              @default(now())
+
+  @@index([orderId, createdAt])
+  @@index([bookingPaymentIntentId])
+  @@index([orderPaymentIntentId])
+  @@map("bank_transfer_references")
+}
+
+model OrderItem {
+  id           String  @id @default(uuid())
+  orderId      String
+  order        Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product @relation(fields: [productId], references: [id])
+  quantity     Int
+  priceApplied Int // Snapshot giá tại thời điểm mua
+
+  @@map("order_items")
+}
+
+// ─── Vouchers & Loyalty ───────────────────────────────────────────────────────
+
+model Voucher {
+  id                String       @id @default(uuid())
+  code              String       @unique
+  title             String
+  description       String?
+  discountType      DiscountType
+  discountValue     Int
+  maxDiscount       Int?
+  minSpend          Int          @default(0)
+  pointCost         Int? // Số điểm cần đổi (null = voucher không mua bằng điểm)
+  expiryDate        DateTime
+  isActive          Boolean      @default(true)
+  usageLimit        Int          @default(-1) // -1 = không giới hạn
+  usageLimitPerUser Int          @default(1) // 1 = mỗi tài khoản một lần, -1 = nhiều lần
+  usageCount        Int          @default(0)
+  createdAt         DateTime     @default(now())
+
+  usages VoucherUsage[]
+
+  @@map("vouchers")
+}
+
+model VoucherUsage {
+  id        String   @id @default(uuid())
+  voucherId String
+  voucher   Voucher  @relation(fields: [voucherId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  bookingId String?  @unique
+  booking   Booking? @relation(fields: [bookingId], references: [id])
+  orderId   String?  @unique
+  order     Order?   @relation(fields: [orderId], references: [id])
+  usedAt    DateTime @default(now())
+
+  @@map("voucher_usages")
+}
+
+model LoyaltyTransaction {
+  id          String      @id @default(uuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id])
+  amount      Int // Điểm tích hoặc tiêu
+  type        LoyaltyType // EARN | REDEEM
+  description String
+  refId       String? // Booking ID hoặc Order ID tham chiếu
+  createdAt   DateTime    @default(now())
+
+  @@map("loyalty_transactions")
+}
+
+// ─── Reviews & Notifications ──────────────────────────────────────────────────
+
+model Review {
+  id               String           @id @default(uuid())
+  authorId         String
+  author           User             @relation(fields: [authorId], references: [id])
+  targetType       ReviewTargetType // SERVICE | PRODUCT
+  targetId         String
+  rating           Int // 1-5
+  comment          String
+  isHidden         Boolean          @default(false)
+  moderationReason String?
+  moderatedAt      DateTime?
+  moderatedById    String?
+  moderatedBy      User?            @relation("ReviewModerator", fields: [moderatedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime         @default(now())
+
+  @@index([isHidden, createdAt])
+  @@map("reviews")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+  title     String
+  body      String
+  type      NotificationType
+  isRead    Boolean          @default(false)
+  refId     String? // Booking ID / Order ID để điều hướng
+  createdAt DateTime         @default(now())
+
+  @@map("notifications")
+}
+
+model AiChatUsage {
+  id           String   @id @default(uuid())
+  requestId    String   @unique
+  source       String
+  modelRequest Boolean  @default(false)
+  model        String
+  durationMs   Int
+  inputTokens  Int?
+  outputTokens Int?
+  totalTokens  Int?
+  reason       String?
+  status       Int?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt, source])
+  @@map("ai_chat_usages")
+}
+
+model AiChatRequest {
+  idempotencyKey String               @id
+  requestHash    String
+  ownerToken     String
+  status         AiChatRequestStatus  @default(PROCESSING)
+  response       Json?
+  leaseExpiresAt DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([status, leaseExpiresAt])
+  @@index([expiresAt])
+  @@map("ai_chat_requests")
+}
+
+model AiAssistantSettings {
+  id                String   @id @default("singleton")
+  dailyRequestLimit Int      @default(1000)
+  updatedAt         DateTime @updatedAt
+
+  @@map("ai_assistant_settings")
+}
+
+model AiKnowledgeEntry {
+  id         String   @id
+  title      String
+  answer     String?
+  content    String
+  source     String
+  reviewedAt String
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([enabled, updatedAt])
+  @@map("ai_knowledge_entries")
+}
+
+model ContactRequest {
+  id        String               @id @default(uuid())
+  fullName  String
+  phone     String
+  email     String?
+  topic     String
+  petInfo   String?
+  message   String
+  status    ContactRequestStatus @default(NEW)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  @@index([status, createdAt])
+  @@map("contact_requests")
+}
