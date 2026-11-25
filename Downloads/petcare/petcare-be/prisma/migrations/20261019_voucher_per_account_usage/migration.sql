@@ -1,2 +1,0 @@
-ALTER TABLE "vouchers"
-ADD COLUMN "usageLimitPerUser" INTEGER NOT NULL DEFAULT 1;
