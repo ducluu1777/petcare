@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+  <rect width="800" height="600" fill="#F1F8F8"/>
+  <circle cx="400" cy="260" r="112" fill="#D7E9E9"/>
+  <g fill="#1D7980" opacity=".78">
+    <ellipse cx="400" cy="286" rx="50" ry="40"/>
+    <ellipse cx="333" cy="239" rx="23" ry="32" transform="rotate(-28 333 239)"/>
+    <ellipse cx="372" cy="206" rx="23" ry="32" transform="rotate(-10 372 206)"/>
+    <ellipse cx="428" cy="206" rx="23" ry="32" transform="rotate(10 428 206)"/>
+    <ellipse cx="467" cy="239" rx="23" ry="32" transform="rotate(28 467 239)"/>
+  </g>
+  <text x="400" y="438" fill="#456260" font-family="system-ui, sans-serif" font-size="28" text-anchor="middle">Hình ảnh dịch vụ đang cập nhật</text>
+</svg>
